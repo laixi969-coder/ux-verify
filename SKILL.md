@@ -1,17 +1,21 @@
 ---
 name: ux-verify
-description: 前端改动后浏览器验证。跑 tsc + 测试 + i18n 一致性 + 用户流程走查 + 交互点击 + 文案检查。触发词：验证一下、跑一下 UX、/ux-verify、前端验证、验一下。
+description: 前端/线上用户体验验证。跑 tsc + 测试 + i18n 一致性 + 浏览器流程走查 + 交互点击 + 文案检查 + 外部服务/部署链路验证。触发词：验证一下、跑一下 UX、/ux-verify、前端验证、验一下、线上失败、帮我测试。
 ---
 
 # 前端验证
 
 前端代码改动完成后，用浏览器实际走一遍完整用户路径，确认交互可用、流程通畅、文案正确。不做代码审查——只验证用户看到和点到的。
 
+如果用户看到的失败来自异步任务、外部 AI、支付/余额、对象存储、队列、部署配置或第三方 API，不要停在浏览器表象；必须追到真实链路，区分是 UI 问题、配置问题、素材问题、余额问题、模型能力问题，还是第三方服务返回的错误。
+
 ## 触发条件
 
 - 用户说"验证一下"、"跑一下 UX"、"前端验证"、"验一下"
 - `/ux-verify` 或 `/frontend-verify`
 - 任何前端改动完成后
+- 用户说"线上失败"、"帮我测试"、"到底是不是配置问题"、"保证能用"
+- 页面显示第三方/异步错误，例如 AI 生成失败、上传失败、视频失败、支付失败、任务 pending/failed
 
 ## 工作流
 
@@ -23,6 +27,13 @@ lsof -i :3000 | grep LISTEN || (npm run dev &)
 ```
 
 如需要登录态且无测试账号，用项目 ORM（Prisma/bcryptjs 等）建一个测试账号，用户名 `qatest` / 密码 `qatest123`。
+
+如果验证的是线上/已部署站点：
+
+- 先确认当前代码是否已推送、服务器是否拉到目标 commit、容器/进程是否重启。
+- 记录健康检查 URL、首页 HTTP 状态、关键 worker/队列是否 ready。
+- 不要把本地通过当成线上通过；线上问题必须在线上环境复现或确认消失。
+- 不要打印 API key、cookie、token、签名完整密文；只输出 provider 名、状态、错误码、余额/额度、key hash 前 8-12 位等安全摘要。
 
 ### 1. 代码质量（自动适配项目）
 
@@ -122,6 +133,39 @@ find . -path "*/messages/*.json" -o -path "*/locales/*.json" -o -path "*/i18n/*.
 | 空状态指引准确 | 检查空状态文案 | 指引指向正确的下一步操作 |
 | 页面间数据传递 | 完成 A 后进入 B | B 能看到 A 的产出 |
 
+### 4.5 外部链路验证（AI / 存储 / 队列 / 支付）
+
+当页面操作会调用外部服务或后台任务时，必须验证真实链路，不只验证按钮和 toast。
+
+| 检查点 | 方法 | 判定标准 |
+|--------|------|----------|
+| 生产配置生效 | 查环境变量/容器 env/管理后台配置 | 线上值不是 localhost、旧域名、错误 provider 或测试 key |
+| API key 可用 | 调 provider 的轻量探针，如 models/credits/test-connection | 能认证；401/403 要归因为 key、权限、余额或账号状态 |
+| 外部资源可下载 | 对模型收到的图片/音频/视频 URL 执行公网 `curl -I -L` | 返回 200、正确 `Content-Type`，不能跳到 `localhost`、`127.0.0.1`、Docker 服务名如 `minio` |
+| 异步任务可提交 | 调真实 submit API 或触发真实用户操作 | 返回 taskId/externalId，不是只创建本地任务 |
+| 异步任务可轮询 | 用真实 externalId 轮询到 pending/completed/failed | completed 才算链路完成；failed 要记录第三方原始错误 |
+| 队列/worker 可消费 | 查 worker 日志、任务状态、run progress | queued/running/completed 状态连续，不能只看 API 返回 queued |
+| 素材满足模型限制 | 检查分辨率、格式、时长、尺寸、音频开关等 | 错误要归因到素材/参数，不误判成 API key |
+| 余额/额度足够 | 查 credits/balance 或第三方错误 | 余额不足是账号状态，不是代码修复完成 |
+
+真实链路测试要优先选最小成本样本：
+
+- 先探针：models/credits/health/HEAD 图片。
+- 再提交 1 个最便宜或最短任务。
+- 对高成本模型，先确认余额和价格；不要盲目批量测试。
+- 如果用户明确要求"保证能用"，至少完成一个真实 submit + poll completed，或者明确说明阻塞原因（余额不足、模型不存在、素材不合格）。
+
+错误归因模板：
+
+| 表象 | 不能直接下结论 | 必须进一步区分 |
+|------|----------------|----------------|
+| 401/Invalid token | API key 错 | key 未配置、key 错、Authorization 格式错、provider 选错、旧配置未部署 |
+| 403/quota/balance | 代码坏 | 余额不足、权限不足、模型套餐不可用 |
+| model_not_found | 前端模型名错 | provider catalog 过期、中转无该渠道、用户保存了不可用模型 |
+| resource download failed | 图片坏 | URL 是内网、需要登录、307 到内网、content-type 错、尺寸不合格 |
+| ffmpeg ENOENT | 视频模型坏 | 容器缺系统依赖 |
+| pending 很久 | 页面卡住 | provider 正在生成、轮询失败、worker 掉线、任务未消费 |
+
 ### 5. 报告
 
 ```
@@ -137,6 +181,10 @@ find . -path "*/messages/*.json" -o -path "*/locales/*.json" -o -path "*/i18n/*.
 □ 用户流程通顺
 □ 布局不重叠/遮挡
 □ 文案无过期引用
+□ 线上部署 commit/健康检查确认（如验证生产）
+□ 外部资源 URL 公网可访问（如涉及 AI/媒体）
+□ 真实异步任务 submit + poll 验证（如涉及队列/第三方）
+□ 第三方错误已归因：配置 / key / 余额 / 模型 / 素材 / 代码
 ```
 
 全部 `□` 变 `✅` 才报"完成"。遇到跳过的项标注 `⚠`。
@@ -151,6 +199,11 @@ find . -path "*/messages/*.json" -o -path "*/locales/*.json" -o -path "*/i18n/*.
 | 无法登录（无测试账号） | 提示用户提供账号或创建测试账号 |
 | 浏览器操作超时 | 重试 1 次，仍失败则报告具体步骤和错误信息 |
 | `$B` 命令不可用 | 提示用户安装 gstack：`cd ~/.claude/skills/gstack && ./setup` |
+| 线上 SSH/部署会话中断 | 不直接判失败；重新连接检查后台进程、commit、镜像时间、容器状态和健康检查 |
+| 外部任务成本高 | 先做低成本探针，说明预计成本或额度要求；只跑必要的最小样本 |
+| API key/密钥相关 | 禁止打印原文；只打印 provider、错误码、安全 hash/长度/前缀摘要 |
+| 第三方返回余额不足 | 报告为账号/额度阻塞，不说"代码已保证成功" |
+| 第三方返回素材限制 | 报告具体限制，如分辨率、格式、时长，并给出下次验证需要的合格素材 |
 
 ## 检查点（需用户确认）
 
@@ -161,3 +214,13 @@ find . -path "*/messages/*.json" -o -path "*/locales/*.json" -o -path "*/i18n/*.
 ## 已知陷阱
 
 **Canvas/transform 层按钮被 DOM 事件拦截**：`pointer-events: none` 或 z-index 问题会导致按钮看起来正常但实际点击穿透到下层元素。tsc 零错误 + 测试全过不代表按钮能点——只有浏览器里 `$B click` 不 timeout 才算数。
+
+**公网 URL 实际跳到内网**：页面里看到 `https://.../api/storage/sign?...` 不代表第三方模型能下载。必须 `curl -I -L` 看最终响应；如果 307 到 `localhost`、`127.0.0.1`、`minio`、容器服务名，外部模型一定下载失败。
+
+**本地/容器/公网 base URL 混用**：`INTERNAL_APP_URL` 适合容器自调用，`NEXTAUTH_URL`/公网域名适合发给浏览器和第三方。给外部 provider 的图片、音频、视频 URL 必须是公网可访问 URL。
+
+**API key 成功不等于任务成功**：models/credits 通过只能说明认证可用。真实生成还可能因为余额不足、模型渠道不存在、素材尺寸不合格、参数能力不匹配而失败。
+
+**异步任务提交成功不等于生成成功**：拿到 taskId/externalId 只算提交成功；必须轮询到 completed，或记录 failed 的第三方原始错误。
+
+**部署脚本中断不等于部署失败**：SSH 断开时，后台 Docker build 可能仍在跑。要回服务器检查 `/tmp/build.log`、build 进程、镜像创建时间、容器启动时间、health，而不是重新猜。
