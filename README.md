@@ -33,6 +33,7 @@ A Claude Code skill that automates frontend QA. After you make UI changes, it ru
 | Empty states | Every empty view has a CTA button, not just text |
 | Copy | No stale feature names, labels match i18n, CTAs point to correct targets |
 | Layout | No overlapping elements, fixed headers don't cover content |
+| Visual stability | Headings do not gain unintended lines, copy does not collapse into a narrow desktop column, and route transitions do not shift text |
 | JS errors | Console checked, known benign errors filtered |
 
 ### Triggers
@@ -76,6 +77,7 @@ cp -r ux-verify ~/.claude/skills/
 | 空状态 | 每个空页面有 CTA 按钮，不是纯文字 |
 | 文案 | 无已删除功能的残留名称，标签与 i18n 一致 |
 | 布局 | 元素不重叠，固定头部不遮挡内容 |
+| 视觉稳定性 | 标题不意外多行、宽屏文案不缩成窄列、页面切换不跳字 |
 | JS 错误 | 检查控制台，过滤已知良性报错 |
 
 ### 触发词

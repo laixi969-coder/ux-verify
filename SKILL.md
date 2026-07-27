@@ -112,6 +112,39 @@ find . -path "*/messages/*.json" -o -path "*/locales/*.json" -o -path "*/i18n/*.
 | 无 JS 错误 | `$B console --errors`，过滤已知良性 error |
 | 布局不遮挡 | 检查固定定位元素不覆盖内容 |
 
+#### 3.4.1 视觉稳定性与排版回归
+
+不要只看“有没有重叠”。在桌面宽屏（至少 1440px）和移动宽度各截图一次，并检查以下三类常见但容易漏掉的回归：
+
+| 检查项 | 方法 | 判定标准 |
+|--------|------|----------|
+| 标题意外换行 | 截图 + `$B js` 读取 `h1` / 页面主标题的高度、宽度与 `line-height` | 标题不得比设计约定多出一行；若页面有断行要求，用 `data-ux-max-lines="2"` 标注后按该上限校验 |
+| 文字跳动 | 导航/切换页面后立刻截图一次，页面稳定后再截图一次；检查 `document.getAnimations()` | 非加载状态下，标题、说明和主要 CTA 的位置/换行不能变化；不得使用逐字出现或会改变文字几何位置的入场动画 |
+| 宽屏文本挤在左侧 | 对比主内容区、标题、导语与紧邻信息卡的宽度 | 主内容已经全宽时，导语或指标说明不应因 `ch`、`text-wrap: balance` 或过小的 `max-width` 无意缩成左侧窄列；有意限制阅读宽度时，以 `data-ux-reading-measure` 标注 |
+| 吸顶栏遮挡首屏 | 切换页面、滚到顶部后截图；检查标题的 `getBoundingClientRect().top` | 标题、面包屑与首个 CTA 必须完整显示在固定顶部栏之下，切换页面不能保留上一页的滚动位置 |
+
+建议为关键标题和有意限制阅读宽度的文案加可验证标记：
+
+```html
+<h1 data-ux-max-lines="2">...</h1>
+<p data-ux-reading-measure>...</p>
+```
+
+浏览器中可用下面的只读检查辅助定位，不把它当作截图审查的替代：
+
+```js
+[...document.querySelectorAll('[data-ux-max-lines], h1')].map((el) => {
+  const style = getComputedStyle(el);
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2;
+  return {
+    text: el.textContent.trim(),
+    lines: Math.round(el.getBoundingClientRect().height / lineHeight),
+    maxLines: Number(el.dataset.uxMaxLines || 0) || undefined,
+    width: Math.round(el.getBoundingClientRect().width),
+  };
+});
+```
+
 #### 3.5 文案验证
 
 | 检查项 | 方法 |
@@ -180,6 +213,8 @@ find . -path "*/messages/*.json" -o -path "*/locales/*.json" -o -path "*/i18n/*.
 □ 按钮可点击 + 有反馈
 □ 用户流程通顺
 □ 布局不重叠/遮挡
+□ 标题无意外换行，宽屏说明未异常收窄
+□ 页面切换后文字位置稳定，无跳字动效
 □ 文案无过期引用
 □ 线上部署 commit/健康检查确认（如验证生产）
 □ 外部资源 URL 公网可访问（如涉及 AI/媒体）
